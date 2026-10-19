@@ -1,0 +1,14 @@
+C:\Users\user\Downloads\Csharp learning\Project_Pokemon_Dasar_Pemrograman\obj\Debug\net10.0\Project_Pokemon_Dasar_Pemrograman.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\user\Downloads\Csharp learning\Project_Pokemon_Dasar_Pemrograman\obj\Debug\net10.0\Project_Pokemon_Dasar_Pemrograman.AssemblyInfoInputs.cache
+C:\Users\user\Downloads\Csharp learning\Project_Pokemon_Dasar_Pemrograman\obj\Debug\net10.0\Project_Pokemon_Dasar_Pemrograman.AssemblyInfo.cs
+C:\Users\user\Downloads\Csharp learning\Project_Pokemon_Dasar_Pemrograman\obj\Debug\net10.0\Project_Pokemon_Dasar_Pemrograman.csproj.CoreCompileInputs.cache
+C:\Users\user\Downloads\Csharp learning\Project_Pokemon_Dasar_Pemrograman\bin\Debug\net10.0\Project_Pokemon_Dasar_Pemrograman.exe
+C:\Users\user\Downloads\Csharp learning\Project_Pokemon_Dasar_Pemrograman\bin\Debug\net10.0\Project_Pokemon_Dasar_Pemrograman.deps.json
+C:\Users\user\Downloads\Csharp learning\Project_Pokemon_Dasar_Pemrograman\bin\Debug\net10.0\Project_Pokemon_Dasar_Pemrograman.runtimeconfig.json
+C:\Users\user\Downloads\Csharp learning\Project_Pokemon_Dasar_Pemrograman\bin\Debug\net10.0\Project_Pokemon_Dasar_Pemrograman.dll
+C:\Users\user\Downloads\Csharp learning\Project_Pokemon_Dasar_Pemrograman\bin\Debug\net10.0\Project_Pokemon_Dasar_Pemrograman.pdb
+C:\Users\user\Downloads\Csharp learning\Project_Pokemon_Dasar_Pemrograman\obj\Debug\net10.0\Project_Pokemon_Dasar_Pemrograman.dll
+C:\Users\user\Downloads\Csharp learning\Project_Pokemon_Dasar_Pemrograman\obj\Debug\net10.0\refint\Project_Pokemon_Dasar_Pemrograman.dll
+C:\Users\user\Downloads\Csharp learning\Project_Pokemon_Dasar_Pemrograman\obj\Debug\net10.0\Project_Pokemon_Dasar_Pemrograman.pdb
+C:\Users\user\Downloads\Csharp learning\Project_Pokemon_Dasar_Pemrograman\obj\Debug\net10.0\Project_Pokemon_Dasar_Pemrograman.genruntimeconfig.cache
+C:\Users\user\Downloads\Csharp learning\Project_Pokemon_Dasar_Pemrograman\obj\Debug\net10.0\ref\Project_Pokemon_Dasar_Pemrograman.dll
