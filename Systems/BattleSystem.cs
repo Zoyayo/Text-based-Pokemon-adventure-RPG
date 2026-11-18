@@ -4,219 +4,367 @@ using PokemonAdventure.Models;
 
 namespace PokemonAdventure.Systems;
 
-public sealed class BattleSystem
+public sealed class BattleSystem(Player player, Random random)
 {
-    private readonly Player _player;
-    private readonly Random _random;
+    private enum BattleResult { Victory, Defeat, Caught, Escaped }
+    private enum BagAction { NoTurnUsed, TurnUsed, Caught }
+    private const int MaxAttackDrops = 4;
 
-    public BattleSystem(Player player, Random random)
+    private sealed class Combatant(Pokemon pokemon)
     {
-        _player = player;
-        _random = random;
+        public Pokemon Pokemon { get; } = pokemon;
+        public int AttackDrops { get; set; }
+        public double EffectiveAttack => Pokemon.Attack * 4.0 / (4 + AttackDrops);
     }
 
-    public void StartWildBattle(Pokemon wild)
+    public void StartWildBattle(Pokemon wild, int experienceBonus = 0)
     {
-        try { RunWildBattle(wild); }
+        if (!player.HasUsablePokemon()) return;
+        try
+        {
+            AnnounceOpponent(wild, $"A wild {wild.Name} Lv. {wild.Level} appeared!", true);
+            var result = BattleOpponent(wild, true, out var active);
+            if (result == BattleResult.Victory)
+            {
+                AudioSystem.StopBattleMusic();
+                Console.WriteLine($"Wild {wild.Name} fainted!");
+                AudioSystem.Play(SoundEffect.Victory);
+                ConsoleUi.Pause();
+                AwardExperience(wild, active, experienceBonus);
+            }
+            else if (result == BattleResult.Defeat) ShowDefeat();
+        }
         finally { AudioSystem.StopBattleMusic(); }
     }
 
-    private void RunWildBattle(Pokemon wild)
+    public bool StartTrainerBattle(string trainerName, List<Pokemon> team)
     {
-        _player.SeenSpecies.Add(wild.SpeciesId);
-        var active = _player.FirstAvailablePokemon()!;
-        Console.WriteLine($"\nA wild {wild.Name} Lv. {wild.Level} appeared!");
-        AudioSystem.Play(SoundEffect.Encounter);
+        if (!player.HasUsablePokemon() || team.Count == 0) return false;
+        try
+        {
+            foreach (var enemy in team)
+            {
+                AnnounceOpponent(enemy, $"{trainerName} sent out {enemy.Name} Lv. {enemy.Level}!", false);
+                if (BattleOpponent(enemy, false, out var active) != BattleResult.Victory)
+                {
+                    ShowDefeat();
+                    return false;
+                }
+                Console.WriteLine($"{enemy.Name} fainted!");
+                ConsoleUi.Pause();
+                AwardExperience(enemy, active);
+            }
+            AudioSystem.StopBattleMusic();
+            Console.WriteLine($"You defeated {trainerName}!");
+            AudioSystem.Play(SoundEffect.Victory);
+            ConsoleUi.Pause();
+            return true;
+        }
+        finally { AudioSystem.StopBattleMusic(); }
+    }
+
+    private void AnnounceOpponent(Pokemon enemy, string message, bool wild)
+    {
+        ConsoleUi.Clear();
+        player.SeenSpecies.Add(enemy.SpeciesId);
+        Console.WriteLine(message);
+        AudioSystem.Play(wild ? SoundEffect.Encounter : SoundEffect.SendOut);
         ConsoleUi.Pause();
         AudioSystem.PlayBattleMusic();
+        SendOut(player.FirstAvailablePokemon()!);
+    }
 
-        while (!wild.IsFainted && _player.HasUsablePokemon())
+    private BattleResult BattleOpponent(Pokemon enemy, bool wild, out Pokemon active)
+    {
+        active = player.FirstAvailablePokemon()!;
+        var ally = new Combatant(active);
+        var opponent = new Combatant(enemy);
+        while (!enemy.IsFainted && player.HasUsablePokemon())
         {
-            ShowStatus(active, wild);
-            Console.WriteLine("1. Fight  2. Bag  3. Pokémon  4. Run");
-            switch (ConsoleUi.ReadChoice(1, 4, menuSound: false))
+            ConsoleUi.Clear();
+            Console.WriteLine($"{(wild ? "Wild " : "")}{enemy.Name} Lv. {enemy.Level} HP {enemy.CurrentHp}/{enemy.MaxHp}");
+            Console.WriteLine($"{active.Name} Lv. {active.Level} HP {active.CurrentHp}/{active.MaxHp}");
+            Console.WriteLine(wild ? "1. Fight  2. Bag  3. Pokémon  4. Run" : "1. Fight  2. Bag  3. Pokémon");
+            switch (ConsoleUi.ReadChoice(1, wild ? 4 : 3, menuSound: false))
             {
                 case 1:
-                    Fight(active, wild);
+                    Fight(ally, opponent);
                     break;
                 case 2:
-                    var usedTurn = UseBag(active, wild, out var caught);
-                    if (caught) return;
-                    if (!usedTurn) continue;
-                    if (!wild.IsFainted) EnemyTurn(active, wild);
+                    var bagAction = UseBag(active, enemy, wild);
+                    if (bagAction == BagAction.Caught) return BattleResult.Caught;
+                    if (bagAction == BagAction.NoTurnUsed) continue;
+                    EnemyTurn(ally, opponent);
                     break;
                 case 3:
-                    active = SwitchPokemon(active);
-                    if (!wild.IsFainted) EnemyTurn(active, wild);
+                    var chosen = SwitchPokemon(active);
+                    if (ReferenceEquals(chosen, active)) continue;
+                    active = chosen;
+                    ally = new Combatant(active);
+                    EnemyTurn(ally, opponent);
                     break;
                 case 4:
-                    if (_random.Next(100) < 70)
+                    if (random.Next(100) < 70)
                     {
                         Console.WriteLine("You got away safely!");
                         AudioSystem.StopBattleMusic();
                         AudioSystem.Play(SoundEffect.RunAway);
                         ConsoleUi.Pause();
-                        return;
+                        return BattleResult.Escaped;
                     }
                     Console.WriteLine("Couldn't escape!");
-                    EnemyTurn(active, wild);
+                    ConsoleUi.Pause();
+                    EnemyTurn(ally, opponent);
                     break;
             }
-
-            if (active.IsFainted && _player.HasUsablePokemon())
+            if (active.IsFainted)
             {
                 Console.WriteLine($"{active.Name} fainted!");
-                active = _player.FirstAvailablePokemon()!;
-                Console.WriteLine($"Go, {active.Name}!");
-                AudioSystem.Play(SoundEffect.SendOut);
+                ConsoleUi.Pause();
+                if (player.HasUsablePokemon())
+                {
+                    active = player.FirstAvailablePokemon()!;
+                    ally = new Combatant(active);
+                    SendOut(active);
+                }
             }
         }
-
-        AudioSystem.StopBattleMusic();
-        if (wild.IsFainted)
-        {
-            Console.WriteLine($"Wild {wild.Name} fainted!");
-            AudioSystem.Play(SoundEffect.Victory);
-            active.ReceiveExperience(15 + wild.Level * 8, Console.WriteLine);
-        }
-        else Console.WriteLine("All of your Pokémon fainted. Return to the Pokémon Center!");
-        ConsoleUi.Pause();
+        return enemy.IsFainted ? BattleResult.Victory : BattleResult.Defeat;
     }
 
-    private void Fight(Pokemon active, Pokemon wild)
+    public static bool PlayerActsFirst(Pokemon active, Pokemon enemy, Random random,
+        int activePriority = 0, int enemyPriority = 0)
     {
-        Console.WriteLine($"\nChoose a move for {active.Name}:");
+        if (activePriority != enemyPriority) return activePriority > enemyPriority;
+        return active.Speed > enemy.Speed || (active.Speed == enemy.Speed && random.Next(2) == 0);
+    }
+
+    private void Fight(Combatant ally, Combatant opponent)
+    {
+        var active = ally.Pokemon;
+        var enemy = opponent.Pokemon;
+        Console.WriteLine($"Choose a move for {active.Name}:");
         for (var i = 0; i < active.MoveNames.Count; i++)
         {
             var move = GameData.GetMove(active.MoveNames[i]);
-            Console.WriteLine($"{i + 1}. {move.Name} ({move.Type}, Power {move.Power})");
+            var description = move.Effect == MoveEffect.LowerAttack ? "Lowers Attack" : $"Power {move.Power}";
+            var priority = move.Priority > 0 ? ", Priority" : "";
+            Console.WriteLine($"{i + 1}. {move.Name} ({move.Type}, {description}{priority})");
         }
-
-        var playerMove = GameData.GetMove(active.MoveNames[ConsoleUi.ReadChoice(1, active.MoveNames.Count, menuSound: false) - 1]);
-        var enemyMove = GameData.GetMove(wild.MoveNames[_random.Next(wild.MoveNames.Count)]);
-        if (active.Speed >= wild.Speed || _random.Next(100) < 50)
+        var playerMove = GameData.GetMove(active.MoveNames[ConsoleUi.ReadChoice(1, active.MoveNames.Count, false) - 1]);
+        var enemyMove = GameData.GetMove(enemy.MoveNames[random.Next(enemy.MoveNames.Count)]);
+        if (PlayerActsFirst(active, enemy, random, playerMove.Priority, enemyMove.Priority))
         {
-            Attack(active, wild, playerMove);
-            if (!wild.IsFainted) Attack(wild, active, enemyMove);
+            Attack(ally, opponent, playerMove);
+            if (!enemy.IsFainted) Attack(opponent, ally, enemyMove);
         }
         else
         {
-            Attack(wild, active, enemyMove);
-            if (!active.IsFainted) Attack(active, wild, playerMove);
+            Attack(opponent, ally, enemyMove);
+            if (!active.IsFainted) Attack(ally, opponent, playerMove);
         }
     }
 
-    private bool UseBag(Pokemon active, Pokemon wild, out bool caught)
+    private BagAction UseBag(Pokemon active, Pokemon enemy, bool wild)
     {
-        caught = false;
-        var balls = _player.Bag.GetValueOrDefault("Poké Ball");
-        var potions = _player.Bag.GetValueOrDefault("Potion");
-        Console.WriteLine($"\n1. Poké Ball ×{balls}\n2. Potion ×{potions}\n3. Cancel");
-        switch (ConsoleUi.ReadChoice(1, 3, menuSound: false))
+        var balls = player.Bag.GetValueOrDefault(Player.PokeBall);
+        var potions = player.Bag.GetValueOrDefault(Player.Potion);
+        Console.WriteLine($"1. Poké Ball ×{balls}{(wild ? "" : " (not allowed in trainer battles)")}\n2. Potion ×{potions}\n3. Cancel");
+        var choice = ConsoleUi.ReadChoice(1, 3, menuSound: false);
+        if (choice == 3) return BagAction.NoTurnUsed;
+
+        var action = choice == 1 ? ThrowPokeBall(enemy, wild, balls) : UsePotion(active, potions);
+        ConsoleUi.Pause();
+        return action;
+    }
+
+    private BagAction ThrowPokeBall(Pokemon enemy, bool wild, int balls)
+    {
+        if (!wild)
         {
-            case 1 when balls > 0:
-                _player.Bag["Poké Ball"]--;
-                Console.WriteLine("You threw a Poké Ball...");
-                var healthBonus = 1.0 - (double)wild.CurrentHp / wild.MaxHp;
-                var chance = Math.Clamp(wild.Species.CatchRate / 510.0 + healthBonus * 0.55, 0.15, 0.9);
-                if (_random.NextDouble() <= chance)
-                {
-                    Console.WriteLine($"Gotcha! {wild.Name} was caught!");
-                    AddCaughtPokemon(wild);
-                    AudioSystem.StopBattleMusic();
-                    AudioSystem.Play(SoundEffect.Caught);
-                    ConsoleUi.Pause();
-                    caught = true;
-                    return true;
-                }
-                Console.WriteLine("Oh no! The Pokémon broke free!");
-                ConsoleUi.Pause();
-                return true;
-            case 1:
-                Console.WriteLine("You have no Poké Balls.");
-                ConsoleUi.Pause();
-                return false;
-            case 2 when potions > 0:
-                _player.Bag["Potion"]--;
-                var healed = Math.Min(20, active.MaxHp - active.CurrentHp);
-                active.CurrentHp += healed;
-                Console.WriteLine($"{active.Name} recovered {healed} HP!");
-                AudioSystem.Play(SoundEffect.Heal);
-                ConsoleUi.Pause();
-                return true;
-            case 2:
-                Console.WriteLine("You have no Potions.");
-                ConsoleUi.Pause();
-                return false;
-            default:
-                return false;
+            Console.WriteLine("You cannot catch another trainer's Pokémon.");
+            return BagAction.NoTurnUsed;
         }
+        if (balls <= 0)
+        {
+            Console.WriteLine("You have no Poké Balls.");
+            return BagAction.NoTurnUsed;
+        }
+
+        player.Bag[Player.PokeBall]--;
+        Console.WriteLine("You threw a Poké Ball...");
+        var healthBonus = 1.0 - (double)enemy.CurrentHp / enemy.MaxHp;
+        var chance = Math.Clamp(enemy.Species.CatchRate / 510.0 + healthBonus * 0.55, 0.15, 0.9);
+        if (random.NextDouble() <= chance)
+        {
+            Console.WriteLine($"Gotcha! {enemy.Name} was caught!");
+            AddCaughtPokemon(enemy);
+            AudioSystem.StopBattleMusic();
+            AudioSystem.Play(SoundEffect.Caught);
+            return BagAction.Caught;
+        }
+        Console.WriteLine("Oh no! The Pokémon broke free!");
+        return BagAction.TurnUsed;
+    }
+
+    private BagAction UsePotion(Pokemon active, int potions)
+    {
+        if (potions <= 0)
+        {
+            Console.WriteLine("You have no Potions.");
+            return BagAction.NoTurnUsed;
+        }
+        if (active.CurrentHp == active.MaxHp)
+        {
+            Console.WriteLine("HP is already full.");
+            return BagAction.NoTurnUsed;
+        }
+
+        player.Bag[Player.Potion]--;
+        var healed = Math.Min(20, active.MaxHp - active.CurrentHp);
+        active.CurrentHp += healed;
+        Console.WriteLine($"{active.Name} recovered {healed} HP!");
+        AudioSystem.Play(SoundEffect.Heal);
+        return BagAction.TurnUsed;
     }
 
     private void AddCaughtPokemon(Pokemon pokemon)
     {
-        _player.CaughtSpecies.Add(pokemon.SpeciesId);
+        player.RegisterCaughtSpecies(pokemon.SpeciesId);
         pokemon.Heal();
-        if (_player.Party.Count < 6)
+        if (player.Party.Count < Player.MaxPartySize)
         {
-            _player.Party.Add(pokemon);
+            player.Party.Add(pokemon);
             Console.WriteLine($"{pokemon.Name} joined your party!");
         }
         else
         {
-            _player.Storage.Add(pokemon);
-            Console.WriteLine("Your party is full. The Pokémon was sent to Storage.");
+            player.Storage.Add(pokemon);
+            Console.WriteLine("Party full. Pokémon sent to Storage.");
         }
     }
 
     private Pokemon SwitchPokemon(Pokemon current)
     {
-        Console.WriteLine("\nChoose Pokémon (0 to cancel):");
-        for (var i = 0; i < _player.Party.Count; i++)
+        Console.WriteLine("Choose Pokémon (0 to cancel):");
+        for (var i = 0; i < player.Party.Count; i++)
         {
-            var pokemon = _player.Party[i];
-            Console.WriteLine($"{i + 1}. {pokemon.Name} Lv. {pokemon.Level} HP {pokemon.CurrentHp}/{pokemon.MaxHp}{(pokemon.IsFainted ? " (Fainted)" : "")}");
+            var pokemon = player.Party[i];
+            Console.WriteLine($"{i + 1}. {pokemon.Name} Lv. {pokemon.Level} HP {pokemon.CurrentHp}/{pokemon.MaxHp}");
         }
-        var selection = ConsoleUi.ReadChoice(0, _player.Party.Count, menuSound: false);
-        if (selection == 0 || _player.Party[selection - 1].IsFainted || _player.Party[selection - 1] == current)
+        var choice = ConsoleUi.ReadChoice(0, player.Party.Count, false);
+        if (choice == 0 || player.Party[choice - 1].IsFainted || ReferenceEquals(player.Party[choice - 1], current))
         {
-            Console.WriteLine("Switch cancelled.");
+            Console.WriteLine("Switch cancelled. No turn used.");
+            ConsoleUi.Pause();
             return current;
         }
-        var chosen = _player.Party[selection - 1];
-        Console.WriteLine($"Go, {chosen.Name}!");
-        AudioSystem.Play(SoundEffect.SendOut);
+        var chosen = player.Party[choice - 1];
+        SendOut(chosen);
         return chosen;
     }
 
-    private void EnemyTurn(Pokemon active, Pokemon wild) => Attack(wild, active, GameData.GetMove(wild.MoveNames[_random.Next(wild.MoveNames.Count)]));
-
-    private void Attack(Pokemon attacker, Pokemon defender, Move move)
+    private static void SendOut(Pokemon pokemon)
     {
+        Console.WriteLine($"Go, {pokemon.Name}!");
+        AudioSystem.Play(SoundEffect.SendOut);
+        ConsoleUi.Pause();
+    }
+
+    private void EnemyTurn(Combatant ally, Combatant opponent)
+    {
+        var moves = opponent.Pokemon.MoveNames;
+        Attack(opponent, ally, GameData.GetMove(moves[random.Next(moves.Count)]));
+    }
+
+    private void Attack(Combatant source, Combatant target, Move move)
+    {
+        var attacker = source.Pokemon;
+        var defender = target.Pokemon;
+        ConsoleUi.Clear();
         Console.WriteLine($"{attacker.Name} used {move.Name}!");
         AudioSystem.Play(SoundEffect.Attack);
-        if (_random.Next(100) >= move.Accuracy) { Console.WriteLine("But it missed!"); return; }
+        if (random.Next(100) >= move.Accuracy)
+        {
+            Console.WriteLine("But it missed!");
+            ConsoleUi.Pause();
+            return;
+        }
         var effectiveness = TypeEffectiveness(move.Type, defender.Species.Type);
-        var critical = _random.Next(100) < 8;
-        var baseDamage = ((2.0 * attacker.Level / 5 + 2) * move.Power * attacker.Attack / Math.Max(1, defender.Defense)) / 12 + 2;
-        var damage = Math.Max(1, (int)(baseDamage * effectiveness * (critical ? 1.5 : 1) * (0.85 + _random.NextDouble() * 0.15)));
-        defender.CurrentHp = Math.Max(0, defender.CurrentHp - damage);
+        if (effectiveness == 0)
+        {
+            Console.WriteLine("It has no effect!");
+            ConsoleUi.Pause();
+            return;
+        }
+        if (move.Effect == MoveEffect.LowerAttack)
+        {
+            if (target.AttackDrops == MaxAttackDrops)
+                Console.WriteLine($"{defender.Name}'s Attack cannot go any lower.");
+            else
+            {
+                target.AttackDrops++;
+                Console.WriteLine($"{defender.Name}'s Attack fell!");
+            }
+            ConsoleUi.Pause();
+            return;
+        }
+        var critical = random.Next(100) < 8;
+        var baseDamage = ((2.0 * attacker.Level / 5 + 2) * move.Power * source.EffectiveAttack / Math.Max(1, defender.Defense)) / 12 + 2;
+        var criticalMultiplier = critical ? 1.5 : 1;
+        var damageVariation = 0.85 + random.NextDouble() * 0.15;
+        var adjustedDamage = (int)(baseDamage * effectiveness * criticalMultiplier * damageVariation);
+        var damage = Math.Min(defender.CurrentHp, Math.Max(1, adjustedDamage));
+        defender.CurrentHp -= damage;
         if (effectiveness > 1) Console.WriteLine("It's super effective!");
         if (effectiveness < 1) Console.WriteLine("It's not very effective...");
         if (critical) Console.WriteLine("A critical hit!");
-        Console.WriteLine($"{defender.Name} lost {damage} HP.");
+        Console.WriteLine($"{defender.Name} lost {damage} HP. HP: {defender.CurrentHp}/{defender.MaxHp}");
+        ConsoleUi.Pause();
     }
 
-    private static double TypeEffectiveness(PokemonType attack, PokemonType defend) => (attack, defend) switch
+    private void AwardExperience(Pokemon enemy, Pokemon active, int bonus = 0)
     {
-        (PokemonType.Grass, PokemonType.Water) => 2,
-        (PokemonType.Grass, PokemonType.Fire) or (PokemonType.Grass, PokemonType.Flying) => 0.5,
-        (PokemonType.Fire, PokemonType.Grass) => 2,
-        (PokemonType.Fire, PokemonType.Water) => 0.5,
-        (PokemonType.Water, PokemonType.Fire) => 2,
-        (PokemonType.Water, PokemonType.Grass) => 0.5,
+        active.ReceiveExperience(15 + enemy.Level * 8 + bonus,
+            message =>
+            {
+                Console.WriteLine(message);
+                ConsoleUi.Pause();
+            },
+            progress =>
+            {
+                AudioSystem.Play(progress == PokemonProgress.LevelUp ? SoundEffect.LevelUp : SoundEffect.Evolution);
+                player.RegisterCaughtSpecies(active.SpeciesId);
+            });
+    }
+
+    private static void ShowDefeat()
+    {
+        AudioSystem.StopBattleMusic();
+        Console.WriteLine("All your Pokémon fainted. Visit the Pokémon Center!");
+        ConsoleUi.Pause();
+    }
+
+    public static double TypeEffectiveness(PokemonType attack, PokemonType defend) => (attack, defend) switch
+    {
+        (PokemonType.Electric, PokemonType.Ground) or (PokemonType.Ground, PokemonType.Flying) => 0,
+        (PokemonType.Grass, PokemonType.Water or PokemonType.Rock or PokemonType.Ground) => 2,
+        (PokemonType.Fire, PokemonType.Grass or PokemonType.Bug) => 2,
+        (PokemonType.Water, PokemonType.Fire or PokemonType.Rock or PokemonType.Ground) => 2,
+        (PokemonType.Flying, PokemonType.Grass or PokemonType.Bug) => 2,
+        (PokemonType.Electric, PokemonType.Water or PokemonType.Flying) => 2,
+        (PokemonType.Bug, PokemonType.Grass) => 2,
+        (PokemonType.Rock, PokemonType.Fire or PokemonType.Flying or PokemonType.Bug) => 2,
+        (PokemonType.Ground, PokemonType.Fire or PokemonType.Electric or PokemonType.Rock) => 2,
+        (PokemonType.Normal, PokemonType.Rock) => 0.5,
+        (PokemonType.Grass, PokemonType.Fire or PokemonType.Grass or PokemonType.Flying or PokemonType.Bug) => 0.5,
+        (PokemonType.Fire, PokemonType.Fire or PokemonType.Water or PokemonType.Rock) => 0.5,
+        (PokemonType.Water, PokemonType.Water or PokemonType.Grass) => 0.5,
+        (PokemonType.Flying, PokemonType.Electric or PokemonType.Rock) => 0.5,
+        (PokemonType.Electric, PokemonType.Electric or PokemonType.Grass) => 0.5,
+        (PokemonType.Bug, PokemonType.Fire or PokemonType.Flying) => 0.5,
+        (PokemonType.Rock, PokemonType.Ground) => 0.5,
+        (PokemonType.Ground, PokemonType.Grass or PokemonType.Bug) => 0.5,
         _ => 1
     };
-
-    private static void ShowStatus(Pokemon active, Pokemon wild) => Console.WriteLine($"\nWild {wild.Name} Lv. {wild.Level}  HP: {wild.CurrentHp}/{wild.MaxHp}\n{active.Name} Lv. {active.Level}  HP: {active.CurrentHp}/{active.MaxHp}");
 }
