@@ -1,4 +1,5 @@
 using PokemonAdventure.Data;
+using PokemonAdventure.Game;
 using PokemonAdventure.Models;
 
 namespace PokemonAdventure.Systems;
@@ -16,16 +17,24 @@ public sealed class BattleSystem
 
     public void StartWildBattle(Pokemon wild)
     {
+        try { RunWildBattle(wild); }
+        finally { AudioSystem.StopBattleMusic(); }
+    }
+
+    private void RunWildBattle(Pokemon wild)
+    {
         _player.SeenSpecies.Add(wild.SpeciesId);
         var active = _player.FirstAvailablePokemon()!;
         Console.WriteLine($"\nA wild {wild.Name} Lv. {wild.Level} appeared!");
-        Pause();
+        AudioSystem.Play(SoundEffect.Encounter);
+        ConsoleUi.Pause();
+        AudioSystem.PlayBattleMusic();
 
         while (!wild.IsFainted && _player.HasUsablePokemon())
         {
             ShowStatus(active, wild);
             Console.WriteLine("1. Fight  2. Bag  3. Pokémon  4. Run");
-            switch (ReadChoice(1, 4))
+            switch (ConsoleUi.ReadChoice(1, 4, menuSound: false))
             {
                 case 1:
                     Fight(active, wild);
@@ -44,7 +53,9 @@ public sealed class BattleSystem
                     if (_random.Next(100) < 70)
                     {
                         Console.WriteLine("You got away safely!");
-                        Pause();
+                        AudioSystem.StopBattleMusic();
+                        AudioSystem.Play(SoundEffect.RunAway);
+                        ConsoleUi.Pause();
                         return;
                     }
                     Console.WriteLine("Couldn't escape!");
@@ -57,16 +68,19 @@ public sealed class BattleSystem
                 Console.WriteLine($"{active.Name} fainted!");
                 active = _player.FirstAvailablePokemon()!;
                 Console.WriteLine($"Go, {active.Name}!");
+                AudioSystem.Play(SoundEffect.SendOut);
             }
         }
 
+        AudioSystem.StopBattleMusic();
         if (wild.IsFainted)
         {
             Console.WriteLine($"Wild {wild.Name} fainted!");
+            AudioSystem.Play(SoundEffect.Victory);
             active.ReceiveExperience(15 + wild.Level * 8, Console.WriteLine);
         }
         else Console.WriteLine("All of your Pokémon fainted. Return to the Pokémon Center!");
-        Pause();
+        ConsoleUi.Pause();
     }
 
     private void Fight(Pokemon active, Pokemon wild)
@@ -78,7 +92,7 @@ public sealed class BattleSystem
             Console.WriteLine($"{i + 1}. {move.Name} ({move.Type}, Power {move.Power})");
         }
 
-        var playerMove = GameData.GetMove(active.MoveNames[ReadChoice(1, active.MoveNames.Count) - 1]);
+        var playerMove = GameData.GetMove(active.MoveNames[ConsoleUi.ReadChoice(1, active.MoveNames.Count, menuSound: false) - 1]);
         var enemyMove = GameData.GetMove(wild.MoveNames[_random.Next(wild.MoveNames.Count)]);
         if (active.Speed >= wild.Speed || _random.Next(100) < 50)
         {
@@ -98,7 +112,7 @@ public sealed class BattleSystem
         var balls = _player.Bag.GetValueOrDefault("Poké Ball");
         var potions = _player.Bag.GetValueOrDefault("Potion");
         Console.WriteLine($"\n1. Poké Ball ×{balls}\n2. Potion ×{potions}\n3. Cancel");
-        switch (ReadChoice(1, 3))
+        switch (ConsoleUi.ReadChoice(1, 3, menuSound: false))
         {
             case 1 when balls > 0:
                 _player.Bag["Poké Ball"]--;
@@ -109,27 +123,30 @@ public sealed class BattleSystem
                 {
                     Console.WriteLine($"Gotcha! {wild.Name} was caught!");
                     AddCaughtPokemon(wild);
-                    Pause();
+                    AudioSystem.StopBattleMusic();
+                    AudioSystem.Play(SoundEffect.Caught);
+                    ConsoleUi.Pause();
                     caught = true;
                     return true;
                 }
                 Console.WriteLine("Oh no! The Pokémon broke free!");
-                Pause();
+                ConsoleUi.Pause();
                 return true;
             case 1:
                 Console.WriteLine("You have no Poké Balls.");
-                Pause();
+                ConsoleUi.Pause();
                 return false;
             case 2 when potions > 0:
                 _player.Bag["Potion"]--;
                 var healed = Math.Min(20, active.MaxHp - active.CurrentHp);
                 active.CurrentHp += healed;
                 Console.WriteLine($"{active.Name} recovered {healed} HP!");
-                Pause();
+                AudioSystem.Play(SoundEffect.Heal);
+                ConsoleUi.Pause();
                 return true;
             case 2:
                 Console.WriteLine("You have no Potions.");
-                Pause();
+                ConsoleUi.Pause();
                 return false;
             default:
                 return false;
@@ -160,7 +177,7 @@ public sealed class BattleSystem
             var pokemon = _player.Party[i];
             Console.WriteLine($"{i + 1}. {pokemon.Name} Lv. {pokemon.Level} HP {pokemon.CurrentHp}/{pokemon.MaxHp}{(pokemon.IsFainted ? " (Fainted)" : "")}");
         }
-        var selection = ReadChoice(0, _player.Party.Count);
+        var selection = ConsoleUi.ReadChoice(0, _player.Party.Count, menuSound: false);
         if (selection == 0 || _player.Party[selection - 1].IsFainted || _player.Party[selection - 1] == current)
         {
             Console.WriteLine("Switch cancelled.");
@@ -168,6 +185,7 @@ public sealed class BattleSystem
         }
         var chosen = _player.Party[selection - 1];
         Console.WriteLine($"Go, {chosen.Name}!");
+        AudioSystem.Play(SoundEffect.SendOut);
         return chosen;
     }
 
@@ -176,6 +194,7 @@ public sealed class BattleSystem
     private void Attack(Pokemon attacker, Pokemon defender, Move move)
     {
         Console.WriteLine($"{attacker.Name} used {move.Name}!");
+        AudioSystem.Play(SoundEffect.Attack);
         if (_random.Next(100) >= move.Accuracy) { Console.WriteLine("But it missed!"); return; }
         var effectiveness = TypeEffectiveness(move.Type, defender.Species.Type);
         var critical = _random.Next(100) < 8;
@@ -200,13 +219,4 @@ public sealed class BattleSystem
     };
 
     private static void ShowStatus(Pokemon active, Pokemon wild) => Console.WriteLine($"\nWild {wild.Name} Lv. {wild.Level}  HP: {wild.CurrentHp}/{wild.MaxHp}\n{active.Name} Lv. {active.Level}  HP: {active.CurrentHp}/{active.MaxHp}");
-    private static int ReadChoice(int min, int max)
-    {
-        while (true)
-        {
-            if (int.TryParse(Console.ReadLine(), out var result) && result >= min && result <= max) return result;
-            Console.Write($"Choose {min}-{max}: ");
-        }
-    }
-    private static void Pause() { Console.WriteLine("\nPress Enter to continue..."); Console.ReadLine(); }
 }
