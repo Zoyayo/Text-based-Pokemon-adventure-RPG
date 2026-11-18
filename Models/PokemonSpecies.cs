@@ -10,5 +10,7 @@ public sealed class PokemonSpecies
     public int BaseDefense { get; init; }
     public int BaseSpeed { get; init; }
     public int CatchRate { get; init; }
+    public int? EvolutionLevel { get; init; }
+    public string? EvolutionTargetId { get; init; }
     public Dictionary<int, string> Learnset { get; init; } = [];
 }
