@@ -7,6 +7,7 @@ namespace PokemonAdventure.Game;
 public sealed class GameManager(Random? random = null)
 {
     private readonly Random _random = random ?? new();
+    private string? _savedSnapshot;
 
     public void Run()
     {
@@ -51,6 +52,7 @@ public sealed class GameManager(Random? random = null)
             name = ConsoleUi.ReadLine().Trim();
         }
         var player = new Player { Name = name, SoundEnabled = AudioSystem.Enabled };
+        _savedSnapshot = null;
         Console.WriteLine($"\nNice to meet you, {name}. Choose your starter:");
         Console.WriteLine("1. Bulbasaur (Grass)");
         Console.WriteLine("2. Charmander (Fire)");
@@ -72,15 +74,16 @@ public sealed class GameManager(Random? random = null)
 
     private Player? LoadGame()
     {
-        var player = SaveSystem.Load();
-        if (player is null) Console.WriteLine("No valid save file was found.");
-        else
+        var loaded = SaveSystem.Load();
+        Console.WriteLine(loaded.Message);
+        if (loaded.Player is { } player)
         {
+            _savedSnapshot = loaded.RecoveredBackup ? null : SaveSystem.Snapshot(player);
             AudioSystem.Enabled = player.SoundEnabled;
             Console.WriteLine($"Welcome back, {player.Name}!");
         }
         ConsoleUi.Pause();
-        return player;
+        return loaded.Player;
     }
 
     private void MainLoop(Player player)
@@ -125,8 +128,12 @@ public sealed class GameManager(Random? random = null)
                     SaveGame(player);
                     break;
                 case 7:
-                    AudioSystem.StopAll();
-                    return;
+                    if (ConfirmReturnToTitle(player))
+                    {
+                        AudioSystem.StopAll();
+                        return;
+                    }
+                    break;
                 case 8:
                     ChallengeGym(player);
                     break;
@@ -254,11 +261,29 @@ public sealed class GameManager(Random? random = null)
         ConsoleUi.Pause();
     }
 
-    private static void SaveGame(Player player)
+    private bool SaveGame(Player player)
     {
-        SaveSystem.Save(player);
-        Console.WriteLine("Game saved to save.json.");
-        AudioSystem.Play(SoundEffect.Save);
+        var result = SaveSystem.Save(player);
+        Console.WriteLine(result.Message);
+        if (result.Success)
+        {
+            _savedSnapshot = SaveSystem.Snapshot(player);
+            AudioSystem.Play(SoundEffect.Save);
+        }
         ConsoleUi.Pause();
+        return result.Success;
+    }
+
+    private bool ConfirmReturnToTitle(Player player)
+    {
+        if (_savedSnapshot == SaveSystem.Snapshot(player)) return true;
+        Console.WriteLine("You have unsaved progress.");
+        Console.WriteLine("1. Save and return  2. Discard and return  0. Keep playing");
+        return ConsoleUi.ReadChoice(0, 2) switch
+        {
+            1 => SaveGame(player),
+            2 => true,
+            _ => false
+        };
     }
 }
