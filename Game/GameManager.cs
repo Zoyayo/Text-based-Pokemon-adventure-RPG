@@ -21,8 +21,9 @@ public sealed class GameManager
             Console.WriteLine("1. New Game");
             Console.WriteLine($"2. Load Game{(SaveSystem.SaveExists() ? string.Empty : " (no save found)")}");
             Console.WriteLine("3. Exit");
+            Console.WriteLine($"4. Sound: {(AudioSystem.Enabled ? "ON" : "OFF")}");
             Console.Write("Choose: ");
-            switch (ReadChoice(1, 3))
+            switch (ConsoleUi.ReadChoice(1, 4))
             {
                 case 1: NewGame(); MainLoop(); break;
                 case 2:
@@ -30,16 +31,21 @@ public sealed class GameManager
                     if (_player is null)
                     {
                         Console.WriteLine("No valid save file was found.");
-                        Pause();
+                        ConsoleUi.Pause();
                     }
                     else
                     {
                         Console.WriteLine($"Welcome back, {_player.Name}!");
-                        Pause();
+                        ConsoleUi.Pause();
                         MainLoop();
                     }
                     break;
                 case 3: return;
+                case 4:
+                    AudioSystem.Enabled = !AudioSystem.Enabled;
+                    Console.WriteLine($"Sound {(AudioSystem.Enabled ? "ON" : "OFF")}.");
+                    ConsoleUi.Pause();
+                    break;
             }
         }
     }
@@ -49,24 +55,25 @@ public sealed class GameManager
         ConsoleUi.Clear();
         Console.WriteLine("Professor: Welcome to the world of Pokémon!");
         Console.Write("What is your name? ");
-        var name = Console.ReadLine()?.Trim();
+        var name = ConsoleUi.ReadLine().Trim();
         while (string.IsNullOrWhiteSpace(name))
         {
             Console.Write("Please enter your name: ");
-            name = Console.ReadLine()?.Trim();
+            name = ConsoleUi.ReadLine().Trim();
         }
         _player = new Player { Name = name };
         Console.WriteLine($"\nNice to meet you, {name}. Choose your starter:");
         Console.WriteLine("1. Bulbasaur (Grass)");
         Console.WriteLine("2. Charmander (Fire)");
         Console.WriteLine("3. Squirtle (Water)");
-        var starterId = ReadChoice(1, 3) switch { 1 => "bulbasaur", 2 => "charmander", _ => "squirtle" };
+        var starterId = ConsoleUi.ReadChoice(1, 3) switch { 1 => "bulbasaur", 2 => "charmander", _ => "squirtle" };
         var starter = Pokemon.Create(starterId, 5);
         _player.Party.Add(starter);
         _player.SeenSpecies.Add(starterId);
         _player.CaughtSpecies.Add(starterId);
         Console.WriteLine($"You received {starter.Name}! Route 1 is waiting for you.");
-        Pause();
+        AudioSystem.Play(SoundEffect.Caught);
+        ConsoleUi.Pause();
     }
 
     private void MainLoop()
@@ -86,7 +93,7 @@ public sealed class GameManager
             Console.WriteLine("6. Save Game");
             Console.WriteLine("7. Return to Title");
             Console.Write("Choose: ");
-            switch (ReadChoice(1, 7))
+            switch (ConsoleUi.ReadChoice(1, 7))
             {
                 case 1: Explore(); break;
                 case 2: ShowParty(); break;
@@ -96,9 +103,13 @@ public sealed class GameManager
                 case 6:
                     SaveSystem.Save(_player);
                     Console.WriteLine("Game saved to save.json.");
-                    Pause();
+                    AudioSystem.Play(SoundEffect.Save);
+                    ConsoleUi.Pause();
                     break;
-                case 7: _player = null; break;
+                case 7:
+                    AudioSystem.StopAll();
+                    _player = null;
+                    break;
             }
         }
     }
@@ -110,11 +121,11 @@ public sealed class GameManager
         if (!_player!.HasUsablePokemon())
         {
             Console.WriteLine("Your party needs healing. Visit the Pokémon Center first.");
-            Pause();
+            ConsoleUi.Pause();
             return;
         }
         if (_random.Next(100) < 70) new BattleSystem(_player, _random).StartWildBattle(GameData.CreateRouteOneEncounter(_random));
-        else { Console.WriteLine("You found nothing this time."); Pause(); }
+        else { Console.WriteLine("You found nothing this time."); ConsoleUi.Pause(); }
     }
 
     private void ShowParty()
@@ -129,7 +140,7 @@ public sealed class GameManager
             Console.WriteLine($"   Moves: {string.Join(", ", pokemon.MoveNames)}");
         }
         Console.WriteLine($"\nStorage: {_player.Storage.Count} Pokémon");
-        Pause();
+        ConsoleUi.Pause();
     }
 
     private void ShowPokedex()
@@ -141,7 +152,7 @@ public sealed class GameManager
             var marker = _player.CaughtSpecies.Contains(species.Id) ? "Caught" : _player.SeenSpecies.Contains(species.Id) ? "Seen" : "-----";
             Console.WriteLine($"[{marker}] {species.Name}");
         }
-        Pause();
+        ConsoleUi.Pause();
     }
 
     private void ShowBag()
@@ -150,28 +161,14 @@ public sealed class GameManager
         Console.WriteLine("BAG");
         foreach (var item in _player!.Bag) Console.WriteLine($"{item.Key} ×{item.Value}");
         Console.WriteLine("\nPotions can be used during battle in this beta.");
-        Pause();
+        ConsoleUi.Pause();
     }
 
     private void HealParty()
     {
         foreach (var pokemon in _player!.Party) pokemon.Heal();
         Console.WriteLine("Your Pokémon are fully healed!");
-        Pause();
-    }
-
-    private static int ReadChoice(int min, int max)
-    {
-        while (true)
-        {
-            if (int.TryParse(Console.ReadLine(), out var result) && result >= min && result <= max) return result;
-            Console.Write($"Enter a number from {min} to {max}: ");
-        }
-    }
-
-    private static void Pause()
-    {
-        Console.WriteLine("\nPress Enter to continue...");
-        Console.ReadLine();
+        AudioSystem.Play(SoundEffect.Heal);
+        ConsoleUi.Pause();
     }
 }
